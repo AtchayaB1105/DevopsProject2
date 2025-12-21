@@ -1,111 +1,161 @@
 pipeline {
     agent any
-    
+
     parameters {
-        string(name: 'ECR_REPO_NAME', defaultValue: 'amazon-prime', description: 'Enter repository name')
-        string(name: 'AWS_ACCOUNT_ID', defaultValue: '123456789012', description: 'Enter AWS Account ID') // Added missing quote
+        string(name: 'ECR_REPO_NAME', defaultValue: 'amazon-prime-clone', description: 'ECR Repository Name')
+        string(name: 'AWS_ACCOUNT_ID', defaultValue: '123456789012', description: 'AWS Account ID')
+        string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS Region')
     }
-    
+
     tools {
         jdk 'JDK'
         nodejs 'NodeJS'
     }
-    
+
     environment {
         SCANNER_HOME = tool 'SonarQube Scanner'
+        AWS_DEFAULT_REGION = "${params.AWS_REGION}"
     }
-    
+
     stages {
+
         stage('1. Git Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/pandacloud1/DevopsProject2.git'
+                git branch: 'main',
+                    url: 'https://github.com/AtchayaB1105/DevopsProject2.git'
             }
         }
-        
+
         stage('2. SonarQube Analysis') {
             steps {
-                withSonarQubeEnv ('sonar-server') {
+                withSonarQubeEnv('sonar-server') {
                     sh """
-                    $SCANNER_HOME/bin/sonar-scanner \
-                    -Dsonar.projectName=amazon-prime \
-                    -Dsonar.projectKey=amazon-prime
+                    ${SCANNER_HOME}/bin/sonar-scanner \
+                    -Dsonar.projectName=${params.ECR_REPO_NAME} \
+                    -Dsonar.projectKey=${params.ECR_REPO_NAME}
                     """
                 }
             }
         }
-        
+
         stage('3. Quality Gate') {
             steps {
-                waitForQualityGate abortPipeline: false, 
-                credentialsId: 'sonar-token'
+                waitForQualityGate abortPipeline: false
             }
         }
-        
-        stage('4. Install npm') {
+
+        stage('4. Install Dependencies') {
             steps {
-                sh "npm install"
+                sh 'npm install'
             }
         }
-        
-        stage('5. Trivy Scan') {
+
+        stage('5. Trivy Filesystem Scan') {
             steps {
-                sh "trivy fs . > trivy.txt"
+                sh 'trivy fs . > trivy-fs-report.txt'
             }
         }
-        
+
         stage('6. Build Docker Image') {
             steps {
-                sh "docker build -t ${params.ECR_REPO_NAME} ."
-            }
-        }
-        
-        stage('7. Create ECR repo') {
-            steps {
-                withCredentials([string(credentialsId: 'access-key', variable: 'AWS_ACCESS_KEY'), 
-                                 string(credentialsId: 'secret-key', variable: 'AWS_SECRET_KEY')]) {
-                    sh """
-                    aws configure set aws_access_key_id $AWS_ACCESS_KEY
-                    aws configure set aws_secret_access_key $AWS_SECRET_KEY
-                    aws ecr describe-repositories --repository-names ${params.ECR_REPO_NAME} --region us-east-1 || \
-                    aws ecr create-repository --repository-name ${params.ECR_REPO_NAME} --region us-east-1
-                    """
-                }
-            }
-        }
-        
-        stage('8. Login to ECR & tag image') {
-            steps {
-                withCredentials([string(credentialsId: 'access-key', variable: 'AWS_ACCESS_KEY'), 
-                                 string(credentialsId: 'secret-key', variable: 'AWS_SECRET_KEY')]) {
-                    sh """
-                    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
-                    docker tag ${params.ECR_REPO_NAME} ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:${BUILD_NUMBER}
-                    docker tag ${params.ECR_REPO_NAME} ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:latest
-                    """
-                }
-            }
-        }
-        
-        stage('9. Push image to ECR') {
-            steps {
-                withCredentials([string(credentialsId: 'access-key', variable: 'AWS_ACCESS_KEY'), 
-                                 string(credentialsId: 'secret-key', variable: 'AWS_SECRET_KEY')]) {
-                    sh """
-                    docker push ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:${BUILD_NUMBER}
-                    docker push ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:latest
-                    """
-                }
-            }
-        }
-        
-        stage('10. Cleanup Images') {
-            steps {
                 sh """
-                docker rmi ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:${BUILD_NUMBER}
-                docker rmi ${params.AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/${params.ECR_REPO_NAME}:latest
-		docker images
+                docker build -t ${params.ECR_REPO_NAME}:latest .
                 """
             }
+        }
+
+        stage('7. Trivy Image Scan') {
+            steps {
+                sh """
+                trivy image ${params.ECR_REPO_NAME}:latest > trivy-image-report.txt
+                """
+            }
+        }
+
+        stage('8. Create ECR Repository (If Not Exists)') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'access-key', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'secret-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                    aws ecr describe-repositories \
+                        --repository-names ${params.ECR_REPO_NAME} || \
+                    aws ecr create-repository \
+                        --repository-name ${params.ECR_REPO_NAME}
+                    """
+                }
+            }
+        }
+
+        stage('9. Login to ECR & Tag Image') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'access-key', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'secret-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
+                    sh """
+                    aws ecr get-login-password | docker login \
+                    --username AWS \
+                    --password-stdin ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com
+
+                    docker tag ${params.ECR_REPO_NAME}:latest \
+                    ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com/${params.ECR_REPO_NAME}:${BUILD_NUMBER}
+
+                    docker tag ${params.ECR_REPO_NAME}:latest \
+                    ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com/${params.ECR_REPO_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('10. Push Image to ECR') {
+            steps {
+                sh """
+                docker push ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com/${params.ECR_REPO_NAME}:${BUILD_NUMBER}
+                docker push ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com/${params.ECR_REPO_NAME}:latest
+                """
+            }
+        }
+        
+        stage('11. Deploy Container (ECR Image)') {
+            steps {
+                sh """
+                echo "Stopping any container using port 8081..."
+                docker ps -q --filter "publish=8081" | xargs -r docker stop
+                docker ps -aq --filter "publish=8081" | xargs -r docker rm
+        
+                echo "Stopping old amazon-prime-clone if exists..."
+                docker ps -q --filter "name=amazon-prime-clone" | xargs -r docker stop
+                docker ps -aq --filter "name=amazon-prime-clone" | xargs -r docker rm
+        
+                echo "Deploying latest container..."
+                docker run -d \
+                --restart unless-stopped \
+                --name amazon-prime-clone \
+                -p 8081:3000 \
+                ${params.AWS_ACCOUNT_ID}.dkr.ecr.${params.AWS_REGION}.amazonaws.com/${params.ECR_REPO_NAME}:latest
+                """
+            }
+        }
+
+        stage('12. Cleanup Local Images') {
+            steps {
+                sh """
+                docker rmi ${params.ECR_REPO_NAME}:latest || true
+                docker images
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful!"
+            echo "Access the app at: http://<EC2-PUBLIC-IP>:8081"
+        }
+        failure {
+            echo "Pipeline failed. Check Jenkins logs."
         }
     }
 }
