@@ -1,4 +1,3 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,5 +18,4 @@ spec:
       - name: pandacloud-container
         image: 309395755719.dkr.ecr.us-east-1.amazonaws.com/amazon-prime:latest
         ports:
-        - containerPort: 3000
-...
+        - containerPort: 8081
