@@ -9,11 +9,11 @@ spec:
   source:
     repoURL: https://github.com/AtchayaB1105/DevopsProject2.git
     targetRevision: main
-    path: src
+    path: k8s_files
 
   destination:
     server: https://kubernetes.default.svc
-    namespace: pandacloud
+    namespace: project3
 
   syncPolicy:
     automated:
