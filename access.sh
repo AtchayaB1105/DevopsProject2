@@ -1,37 +1,37 @@
 #!/bin/bash
-# This script is used to get the argocd, prometheus & grafana urls & credentials
 
-aws configure
-aws eks update-kubeconfig --region "us-east-1" --name "amazon-prime-cluster"
+set -e
 
-# ArgoCD Access
-argo_url=$(kubectl get svc -n argocd | grep argocd-server | awk '{print$4}' | head -n 1)
-argo_initial_password=$(argocd admin initial-password -n argocd)
+echo "Updating kubeconfig..."
+aws eks --region us-east-1 update-kubeconfig --name amazon-prime-cluster
 
-# ArgoCD Credentials
-argo_user="admin"
-
-argo_password=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode)
-
-# Prometheus and Grafana URLs and credentials
-prometheus_url=$(kubectl get svc -n prometheus | grep stable-kube-prometheus-sta-prometheus | awk '{print $4}')
-grafana_url=$(kubectl get svc -n prometheus | grep stable-grafana | awk '{print $4}')
-grafana_user="admin"
-grafana_password=$(kubectl get secret stable-grafana -n prometheus -o jsonpath="{.data.admin-password}" | base64 --decode)
-
-# Print or use these variables
-echo "------------------------"
-echo "ArgoCD URL: $argo_url"
-echo "ArgoCD User: $argo_user"
-echo "ArgoCD Initial Password: $argo_initial_password" | head -n 1
-echo
-echo "Prometheus URL: $prometheus_url":9090
-echo
-echo "Grafana URL: $grafana_url"
-echo "Grafana User: $grafana_user"
-echo "Grafana Password: $grafana_password"
 echo "------------------------"
 
-# Run below commands
-# chmod a+x access.sh
-# ./access.sh
+# ArgoCD
+ARGO_URL=$(kubectl get svc argocd-server -n argocd \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+ARGO_PWD=$(kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 --decode)
+
+# Prometheus
+PROM_URL=$(kubectl get svc monitoring-kube-prometheus-prometheus -n prometheus \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+# Grafana
+GRAFANA_URL=$(kubectl get svc monitoring-grafana -n prometheus \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+GRAFANA_PWD=$(kubectl get secret monitoring-grafana -n prometheus \
+  -o jsonpath="{.data.admin-password}" | base64 --decode)
+
+echo "ArgoCD URL: http://$ARGO_URL"
+echo "ArgoCD User: admin"
+echo "ArgoCD Initial Password: $ARGO_PWD"
+echo
+echo "Prometheus URL: http://$PROM_URL:9090"
+echo
+echo "Grafana URL: http://$GRAFANA_URL"
+echo "Grafana User: admin"
+echo "Grafana Password: $GRAFANA_PWD"
+echo "------------------------"
