@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: project3-app
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/AtchayaB1105/DevopsProject2.git
+    targetRevision: main
+    path: k8s_files
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: project3
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
